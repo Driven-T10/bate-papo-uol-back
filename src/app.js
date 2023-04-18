@@ -96,6 +96,79 @@ app.post("/messages", async (req, res) => {
 
 })
 
+app.get("/messages", async (req, res) => {
+    const { user } = req.headers
+    const { limit } = req.query
+    const numberLimit = Number(limit)
+
+    if (limit !== undefined && (numberLimit <= 0 || isNaN(numberLimit))) return res.sendStatus(422)
+
+    try {
+        const messages = await db.collection("messages")
+            .find({ $or: [{ from: user }, { to: { $in: ["Todos", user] } }, { type: "message" }] })
+            .sort(({ $natural: -1 }))
+            .limit(limit === undefined ? 0 : numberLimit)
+            .toArray()
+
+        res.send(messages)
+
+    } catch (err) {
+        res.status(500).send(err.message)
+    }
+})
+
+app.post("/status", async (req, res) => {
+    const { user } = req.headers
+
+    if (!user) return res.sendStatus(404)
+
+    try {
+        // const participant = await db.collection("participants").findOne({ name: user })
+        // if (!participant) return res.sendStatus(404)
+
+        const result = await db.collection("participants").updateOne(
+            { name: user }, { $set: { lastStatus: Date.now() } }
+        )
+
+        if (result.matchedCount === 0) return res.sendStatus(404)
+        res.sendStatus(200)
+
+    } catch (err) {
+        res.status(500).send(err.message)
+    }
+})
+
+setInterval(async () => {
+    const tenSecondsAgo = Date.now() - 10000
+
+    try {
+        const inactive = await db.collection("participants")
+            .find({ lastStatus: { $lt: tenSecondsAgo } })
+            .toArray()
+
+        console.log(inactive)
+
+        if (inactive.length > 0) {
+
+            const messages = inactive.map(inactive => {
+                return {
+                    from: inactive.name,
+                    to: 'Todos',
+                    text: 'sai da sala...',
+                    type: 'status',
+                    time: dayjs().format("HH:mm:ss")
+                }
+            })
+
+            await db.collection("messages").insertMany(messages)
+            await db.collection("participants").deleteMany({ lastStatus: { $lt: tenSecondsAgo } })
+        }
+
+    } catch (err) {
+        res.status(500).send(err.message)
+    }
+}, 15000)
+
 
 // Deixa o app escutando, à espera de requisições
 const PORT = 5000
