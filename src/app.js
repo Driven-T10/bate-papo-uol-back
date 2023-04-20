@@ -4,6 +4,7 @@ import dotenv from "dotenv"
 import express from "express"
 import joi from "joi"
 import { MongoClient } from "mongodb"
+import { stripHtml } from "string-strip-html"
 
 const app = express()
 
@@ -37,20 +38,22 @@ const messageSchema = joi.object({
 app.post("/participants", async (req, res) => {
     const { name } = req.body
 
-    const validation = participantSchema.validate(req.body, { abortEarly: false })
+    const cleanName = typeof name === "string" && stripHtml(name).result.trim()
+
+    const validation = participantSchema.validate({ name: cleanName }, { abortEarly: false })
     if (validation.error) {
         return res.status(422).send(validation.error.details.map(detail => detail.message))
     }
 
     try {
-        const participant = await db.collection("participants").findOne({ name })
+        const participant = await db.collection("participants").findOne({ name: cleanName })
         if (participant) return res.sendStatus(409)
 
         const timestamp = Date.now()
-        await db.collection("participants").insertOne({ name, lastStatus: timestamp })
+        await db.collection("participants").insertOne({ name: cleanName, lastStatus: timestamp })
 
         const message = {
-            from: name,
+            from: cleanName,
             to: 'Todos',
             text: 'entra na sala...',
             type: 'status',
@@ -76,17 +79,25 @@ app.get("/participants", async (req, res) => {
 
 app.post("/messages", async (req, res) => {
     const { user } = req.headers
+    const { to, text, type } = req.body
 
-    const validation = messageSchema.validate({ ...req.body, from: user }, { abortEarly: false })
+    const cleanMessage = {
+        from: typeof user === "string" && stripHtml(user).result.trim(),
+        to: typeof to === "string" && stripHtml(to).result.trim(),
+        text: typeof text === "string" && stripHtml(text).result.trim(),
+        type: typeof type === "string" && stripHtml(type).result.trim()
+    }
+
+    const validation = messageSchema.validate(cleanMessage, { abortEarly: false })
     if (validation.error) {
         return res.status(422).send(validation.error.details.map(detail => detail.message))
     }
 
     try {
-        const participant = await db.collection("participants").findOne({ name: user })
+        const participant = await db.collection("participants").findOne({ name: cleanMessage.from })
         if (!participant) return res.sendStatus(422)
 
-        const message = { ...req.body, from: user, time: dayjs().format("HH:mm:ss") }
+        const message = { ...cleanMessage, time: dayjs().format("HH:mm:ss") }
         await db.collection("messages").insertOne(message)
         res.sendStatus(201)
 
